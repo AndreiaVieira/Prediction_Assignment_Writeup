@@ -1,0 +1,216 @@
+---
+title: "Course Project  - Practical Machine Learning"
+author: "Andreia Vieira"
+date: "12/08/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Prediction Assignment Writeup
+
+### 1) Summay
+
+Company are realized measurements regularly about themselves  to improve their health, to find patterns in their behavior, or because they are tech geeks. In this perspective,participants were asked to perform barbell lifts correctly and incorrectly in 5 different ways. Based on this experience, the activity aims to predict the way in which new participants performed the exercises described and answer questions in the associated course questionnaire. The initial studies were based on the experience of six participants. The machine learning algorithm, which uses the class variable in the training set, is applied to the 20 test cases. The activity was developed in RStudio and published in html format.
+
+### 2) Data
+
+The training data for this project are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. 
+
+VELLOSO, E.; BULLING, A.; GELLERSEN, H.; UGULINO, W.; FUKS, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+### 3) Data Loading 
+
+```{r message=FALSE, warning=FALSE, , echo=TRUE}
+
+library(caret)
+#library(knitr)
+library(ggplot2)
+library(rpart)
+#library(rpart.plot)
+library(lares)
+library(dplyr)
+library(Hmisc)
+library(corrplot)
+#library(rattle)
+library(randomForest)
+library(gbm)
+set.seed(2020)
+
+# set the URL for the download
+Train <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+Validation  <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+# download the datasets
+training <- read.csv(url(Train))
+validation  <- read.csv(url(Validation))
+
+str(training)
+
+
+
+```
+
+### 4) Data cleaning
+
+```{r , echo = TRUE, warning=FALSE, message=TRUE}
+
+data_training <-training
+
+
+# Variable characteristics
+#str(data_training)
+
+
+# remove variables that are mostly NA
+data_NA    <- sapply(data_training, function(x) mean(is.na(x))) > 0.95
+data_training <- data_training[, data_NA==FALSE]
+dim(data_training)
+
+# values close to zero - weak correlation
+
+data_zero <- nearZeroVar(data_training)
+data_training<- data_training[, -data_zero]
+dim(data_training)
+
+#remover variables init
+data_training <- data_training[, -(1:5)]
+dim(data_training)
+
+
+# split
+
+data_split <- createDataPartition(data_training$classe, p=0.7, list=FALSE)
+
+TrainSet <- data_training[data_split,]
+TestSet  <- data_training[-data_split,]
+
+dim(TrainSet)
+dim(TestSet)
+
+#Filtered variables
+
+str(TrainSet)
+
+
+```
+### 5) - Correlation Analysis
+```{r , echo = TRUE, warning=FALSE, message=FALSE}
+
+
+#  Dataset without target variable - 53 variables
+Avaiable_Correlation<-TrainSet[, -54]
+
+# Correlations all variables
+Matrix_correlation<-cor(Avaiable_Correlation)
+corrplot(Matrix_correlation, type="upper", order="hclust", tl.col="black", tl.srt=45, tl.cex = 0.5)
+
+
+
+#Variables that showed some high correlations - 29 variables
+corr_cross(Avaiable_Correlation)
+corr_cross(Avaiable_Correlation, type = 2)
+variables<-corr_cross(Avaiable_Correlation, plot=FALSE)
+
+
+
+#filter
+Newdataset<-select(Avaiable_Correlation,accel_arm_z, yaw_belt, accel_forearm_y, magnet_dumbbell_x,
+total_accel_dumbbell,yaw_dumbbell,magnet_arm_y,roll_belt,accel_arm_x,pitch_dumbbell,
+roll_belt,magnet_arm_x,gyros_belt_x,accel_belt_z,magnet_belt_y,magnet_arm_z,accel_belt_z,
+magnet_forearm_y,magnet_dumbbell_y,accel_dumbbell_y,roll_belt,roll_belt,total_accel_belt,
+pitch_belt,accel_belt_y,total_accel_belt,roll_belt,gyros_arm_x,accel_belt_x,pitch_belt,
+accel_dumbbell_z,magnet_arm_z,yaw_belt,magnet_arm_x,accel_dumbbell_x,accel_arm_y,magnet_arm_y,
+magnet_dumbbell_y,accel_arm_y,magnet_belt_z,accel_belt_z,total_accel_belt,accel_belt_z,
+accel_belt_x,accel_belt_z,accel_belt_y,accel_belt_y,gyros_arm_y,magnet_belt_x,magnet_belt_x)
+
+
+# Correlations selected variables - 29 variables
+Matrix_correlation<-cor(Newdataset)
+corrplot(Matrix_correlation, type="upper", order="hclust", tl.col="black", tl.srt=45, tl.cex = 0.5)
+
+   
+
+```
+### 6) Prediction Model Building
+
+#### Build two different models: glm and rf
+
+#### 6.1 Method: gbm and rf- training
+
+```{r , echo = TRUE, warning=FALSE, message=FALSE}
+
+
+#gbm model
+set.seed(2020)
+model_gbm <-train(classe ~ ., method="gbm", data=TrainSet, trControl= trainControl(method= "repeatedcv", number = 5, repeats = 1), verbose = FALSE)
+model_gbm$finalModel
+
+#rf model
+set.seed(2021)
+model_rf <- train(classe ~ ., data=TrainSet, method="rf",
+                          trControl=trainControl(method="cv", number=5, verboseIter=FALSE))
+model_rf$finalModel
+
+
+
+```
+#### 6.2 Method: gbm and rf- test
+
+```{r , echo = TRUE, warning=FALSE, message=FALSE}
+
+# test model gbm
+predict_gbm <- predict(model_gbm, newdata=TestSet)
+confMat_gbm  <- confusionMatrix(table(predict_gbm, TestSet$classe)) 
+confMat_gbm
+
+# test model rf
+predict_rf <- predict(model_rf, newdata=TestSet)
+confMat_rf  <- confusionMatrix(table(predict_rf, TestSet$classe)) 
+confMat_rf
+
+
+
+
+```
+#### 6.3 Method: gbm and rf- plot
+```{r , echo = TRUE, warning=FALSE, message=FALSE}
+
+# plot matrix gbm results
+plot(confMat_gbm$table, col = confMat_gbm$byClass, 
+    main = paste("gbm - Accuracy =", round(confMat_gbm$overall['Accuracy'], 4)))
+
+# plot matrix rf results
+plot(confMat_rf$table, col = confMat_rf$byClass, 
+    main = paste("rf - Accuracy =", round(confMat_rf$overall['Accuracy'], 4)))
+
+
+
+```
+
+### 7) Applying the Selected Model (best model) to the Test Data (Validation)
+
+```{r , echo = TRUE, warning=FALSE, message=FALSE}
+
+#best result  method rf
+predict_validation <- predict(model_rf, newdata=validation)
+predict_validation
+
+```
+  
+  
+
+
+```
+
+  
+  
